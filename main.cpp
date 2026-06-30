@@ -1,44 +1,99 @@
+#include <EEPROM.h>
 #include <Servo.h>
 
-Servo solarServo;
+Servo myservo;
 
-// LDR pins
-int ldrLeft = A0;
-int ldrRight = A1;
+const int sensor1 = A1;
+const int sensor2 = A0;
+const int calswitch = 2;
 
-// Servo position
-int servoPos = 90;
+int val1, val2;
+int pos = 45;          // Start at center position
+int error = 0;
+byte state = 0;
 
-void setup() {
-  solarServo.attach(9);   // Servo connected to pin 9
-  solarServo.write(servoPos);
+const int threshold = 20;   // Prevent servo jitter
 
-  Serial.begin(9600);
+void setup()
+{
+    pinMode(sensor1, INPUT);
+    pinMode(sensor2, INPUT);
+    pinMode(calswitch, INPUT_PULLUP);
+
+    myservo.attach(10);
+    myservo.write(pos);
+
+    EEPROM.get(0, error);
+    state = EEPROM.read(sizeof(int));
+
+    if (state > 1)
+        state = 0;
 }
 
-void loop() {
+void loop()
+{
+    // Calibration Mode (switch pressed)
+    if (digitalRead(calswitch) == LOW)
+    {
+        myservo.detach();
 
-  int leftValue = analogRead(ldrLeft);
-  int rightValue = analogRead(ldrRight);
+        val1 = analogRead(sensor1);
+        val2 = analogRead(sensor2);
 
-  Serial.print("Left LDR: ");
-  Serial.print(leftValue);
-  Serial.print("  Right LDR: ");
-  Serial.println(rightValue);
+        if (val1 > val2)
+        {
+            error = val1 - val2;
+            state = 0;
+        }
+        else
+        {
+            error = val2 - val1;
+            state = 1;
+        }
 
-  int threshold = 50;   // Sensitivity threshold
+        EEPROM.put(0, error);
+        EEPROM.update(sizeof(int), state);
 
-  if (leftValue - rightValue > threshold) {
-    servoPos--;
-    if (servoPos < 0) servoPos = 0;
-    solarServo.write(servoPos);
-  }
+        delay(500);
+    }
+    else
+    {
+        if (!myservo.attached())
+        {
+            myservo.attach(10);
+        }
 
-  else if (rightValue - leftValue > threshold) {
-    servoPos++;
-    if (servoPos > 180) servoPos = 180;
-    solarServo.write(servoPos);
-  }
+        val1 = analogRead(sensor1);
+        val2 = analogRead(sensor2);
 
-  delay(100);
+        EEPROM.get(0, error);
+        state = EEPROM.read(sizeof(int));
+
+        // Apply calibration correction
+        if (state == 0)
+        {
+            val1 -= error;
+        }
+        else
+        {
+            val2 -= error;
+        }
+
+        // Tracking logic
+        if (val1 > val2 + threshold)
+        {
+            pos--;
+        }
+        else if (val2 > val1 + threshold)
+        {
+            pos++;
+        }
+
+        // Limit servo movement
+        pos = constrain(pos, 0, 180);
+
+        myservo.write(pos);
+
+        delay(20);
+    }
 }
